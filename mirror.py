@@ -33,6 +33,9 @@ class Downloader:
             if dirpath == self.index_path:
                 # No package at the root.
                 continue
+            elif any(x.startswith('.') for x in os.path.split(dirpath)):
+                # dotfile
+                continue
             for filename in filenames:
                 yield (filename, os.path.join(dirpath, filename))
 
