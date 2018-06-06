@@ -103,12 +103,16 @@ class Downloader:
 def main():
     if len(sys.argv) == 3:
         (_, index_path, mirror_path) = sys.argv
+        processes = 20
+    elif len(sys.argv) == 4:
+        (_, index_path, mirror_path, processes) = sys.argv
+        processes = int(processes)
     else:
-        print('Syntax: {} <index_path> <mirror_path>'.format(sys.argv[0]))
+        print('Syntax: {} <index_path> <mirror_path> [<concurrency>]'.format(sys.argv[0]))
         exit(1)
     downloader = Downloader(index_path, mirror_path)
     downloader.update_index()
-    with multiprocessing.dummy.Pool(20) as pool:
+    with multiprocessing.dummy.Pool(processes) as pool:
         for x in pool.imap_unordered(downloader.download_package, downloader.get_packages()):
             pass
 
