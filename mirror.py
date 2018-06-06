@@ -73,7 +73,12 @@ class Downloader:
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)
         url = CRATE_URL_FORMAT.format(package_name=package_name, version=version)
-        response = requests.get(url, stream=True)
+
+        for x in range(10):
+            try: response = requests.get(url, stream=True)
+            except: continue
+            else: break
+
 
         if response.status_code != 200:
             print('Could not download {}: HTTP code {}'.format(url, response.status_code))
