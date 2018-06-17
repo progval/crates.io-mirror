@@ -141,7 +141,7 @@ class Downloader:
             except toml.TomlDecodeError:
                 return {}
             except Exception as e:
-                raise Exception('Failed unTOMLing Cargo.toml from {}'.format(crate_filename))
+                raise toml.TomlDecodeError('Failed unTOMLing Cargo.toml from {}'.format(tf.name))
 
     def get_readme(self, tf, dir_in_crate, parsed_toml):
         readme_path = parsed_toml.get('package', {}).get('readme', None)
@@ -185,7 +185,10 @@ class Downloader:
         if regen_html or get_description:
             try:
                 with tarfile.open(crate_filename, 'r') as tf:
-                    parsed_toml = self.parse_cargo_toml(dir_in_crate, tf)
+                    try:
+                        parsed_toml = self.parse_cargo_toml(dir_in_crate, tf)
+                    except toml.TomlDecodeError:
+                        return
                     if regen_html:
                         readme = self.get_readme(tf, dir_in_crate, parsed_toml)
                     license = parsed_toml.get('package', {}).get('license', None)
