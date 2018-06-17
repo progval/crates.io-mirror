@@ -29,11 +29,11 @@ class Downloader:
 
     def get_packages(self):
         """Returns a list of `(package_names, path_in_index)`."""
-        for (dirpath, dirname, filenames) in os.walk(self.index_path):
+        for (dirpath, dirname, filenames) in sorted(os.walk(self.index_path)):
             if dirpath == self.index_path:
                 # No package at the root.
                 continue
-            elif any(x.startswith('.') for x in os.path.split(dirpath)):
+            elif any(x.startswith('.') for x in dirpath.split(os.path.sep)):
                 # dotfile
                 continue
             for filename in filenames:
@@ -77,7 +77,7 @@ class Downloader:
             os.makedirs(target_dir)
         url = CRATE_URL_FORMAT.format(package_name=package_name, version=version)
 
-        for x in range(10):
+        for x in range(100):
             try: response = requests.get(url, stream=True)
             except: continue
             else: break
@@ -91,22 +91,27 @@ class Downloader:
             with open(target_filename, 'ab') as fd:
                 shutil.copyfileobj(response.raw, fd)
 
-            actual_checksum = checksum(target_filename)
+            actual_checksum = self.checksum(target_filename)
             if actual_checksum != expected_checksum:
                 print('Checksum failed for {}: expected {}, got {}'.format(
                     target_filename, expected_checksum, actual_checksum))
                 os.unlink(target_filename)
         except:
             os.unlink(target_filename)
+            raise
 
 
     def download_package(self, args):
         (package_name, index_filename) = args
         print('Downloading {}'.format(package_name))
-        for release in self.get_releases(index_filename):
-            assert package_name.lower() == release['name'].lower()
-            if not self.is_already_downloaded(release):
-                self.download_release(release)
+        try:
+            for release in self.get_releases(index_filename):
+                assert package_name.lower() == release['name'].lower()
+                if not self.is_already_downloaded(release):
+                    self.download_release(release)
+        except:
+            print('Failure while downloading {} ({}):'.format(package_name, index_filename))
+            raise
 
 def main():
     if len(sys.argv) == 3:
