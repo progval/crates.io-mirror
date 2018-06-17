@@ -168,26 +168,32 @@ class Downloader:
         package_name = release['name']
         version = release['vers']
         target_dir = os.path.join(self.mirror_path, 'crates', package_name)
+        target_api_dir = os.path.join(self.mirror_path, 'api', 'v1', 'crates', package_name)
         crate_filename = os.path.join(target_dir, '{}-{}.crate'.format(package_name, version))
         dir_in_crate = '{}-{}'.format(package_name, version)
         if not os.path.isdir(os.path.join(target_dir, version)):
             os.makedirs(os.path.join(target_dir, version))
+        if not os.path.isdir(os.path.join(target_api_dir, version)):
+            os.makedirs(os.path.join(target_api_dir, version))
 
         html_filename = os.path.join(target_dir, version, 'index.html')
         html_timestamp = file_timestamp(html_filename)
         regen_html = html_timestamp < file_timestamp(crate_filename) or \
                 html_timestamp < THIS_FILE_TIMESTAMP
+        json_filename = os.path.join(target_api_dir, version, 'index.json')
 
-        if not regen_html and not get_description:
-            return
-
-        try:
-            with tarfile.open(crate_filename, 'r') as tf:
-                parsed_toml = self.parse_cargo_toml(dir_in_crate, tf)
-                if regen_html:
-                    readme = self.get_readme(tf, dir_in_crate, parsed_toml)
-        except tarfile.ReadError:
-            return
+        if regen_html or get_description:
+            try:
+                with tarfile.open(crate_filename, 'r') as tf:
+                    parsed_toml = self.parse_cargo_toml(dir_in_crate, tf)
+                    if regen_html:
+                        readme = self.get_readme(tf, dir_in_crate, parsed_toml)
+                    license = parsed_toml.get('package', {}).get('license', None)
+            except tarfile.ReadError:
+                return
+        else:
+            license = '<skipped>' # sorry, I don't want to gunzip just to get the license
+            parsed_toml = {}
 
         if regen_html:
             if os.path.exists(html_filename):
@@ -197,7 +203,23 @@ class Downloader:
                 fd.write(markdown2.markdown(readme))
                 fd.write('\n</body></html>')
 
-        return parsed_toml.get('package', {}).get('description', 'No description')
+        json_data = {'version': {
+            'id': '{}-{}'.format(release['name'], release['vers']),
+            'crate': release['name'],
+            'num': release['vers'],
+            'readme_path': '/api/v1/crates/{name}/{vers}/readme'.format(**release), # TODO
+            'dl_path': '/api/v1/crates/{name}/{vers}/download'.format(**release), # TODO
+            'features': release['features'],
+            'yanked': release['yanked'],
+            'license': license,
+            'links': {}, # TODO
+            }}
+        if os.path.exists(json_filename):
+            os.unlink(json_filename)
+        with open(json_filename, 'a') as fd:
+            json.dump(json_data, fd)
+
+        return (parsed_toml.get('package', {}).get('description', 'No description'), json_data)
 
 
     def gen_package(self, package_name, index_filename):
@@ -205,12 +227,17 @@ class Downloader:
         releases = list(self.get_releases(index_filename))
         releases.sort(key=lambda x: semver.parse_version_info(x['vers']))
         description = ''
+        json_versions_data = []
         for (i, release) in enumerate(releases):
             assert package_name.lower() == release['name'].lower()
             if not self.is_already_downloaded(release):
                 continue
-            description = self.gen_release(release,
+            ret = self.gen_release(release,
                     get_description=(i==len(releases)-1))
+            if ret is None:
+                continue
+            (description, json_data) = ret
+            json_versions_data.append(json_data)
 
         target_dir = os.path.join(self.mirror_path, 'crates', package_name)
 
@@ -225,6 +252,26 @@ class Downloader:
             for release in releases:
                 fd.write('<li><a href="./{vers}/">{vers}</a></li>\n'.format(**release))
             fd.write('</ul></body></html>')
+
+        target_api_dir = os.path.join(self.mirror_path, 'api', 'v1', 'crates', package_name)
+        if not os.path.isdir(target_api_dir):
+            os.makedirs(target_api_dir)
+        json_filename = os.path.join(target_api_dir, 'index.json')
+        json_data = {
+            'crate': {
+                'id': package_name,
+                'name': package_name,
+                'versions': ['{name}-{vers}'.format(**release) for release in releases],
+                'max_version': '{name}-{vers}'.format(**releases[-1]),
+                'description': description,
+                },
+            'versions': json_versions_data,
+            }
+        if os.path.exists(json_filename):
+            os.unlink(json_filename)
+        with open(json_filename, 'a') as fd:
+            json.dump(json_data, fd)
+        print('wrote {}'.format(json_filename))
 
         return description
 
