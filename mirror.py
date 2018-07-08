@@ -28,17 +28,25 @@ def file_timestamp(filename):
 THIS_FILE_TIMESTAMP = file_timestamp(__file__)
 
 class Downloader:
-    def __init__(self, index_path, mirror_path):
+    def __init__(self, index_path, mirror_path, root_url):
         self.index_path = index_path
         self.mirror_path = mirror_path
+        self.root_url = root_url
 
     def update_index(self):
         if os.path.isdir(self.index_path):
             print('Pulling latest changes from the index.')
-            subprocess.check_output(['git', '-C', self.index_path, 'pull'])
+            subprocess.check_output(['git', '-C', self.index_path, 'fetch', '--all'])
+            subprocess.check_output(['git', '-C', self.index_path, 'reset', '--hard', 'origin/master'])
+            os.unlink(os.path.join(self.index_path, 'config.json'))
         else:
             print('Downloading index.')
             subprocess.check_output(['git', 'clone', INDEX_GIT_URL, self.index_path])
+        with open(os.path.join(self.index_path, 'config.json'), 'a') as fd:
+            config = {'dl': self.root_url + '/api/v1/crates', 'api': self.root_url}
+            fd.write(json.dumps(config))
+        subprocess.check_output(['git', '-C', self.index_path, 'config', 'user.name', 'mirror'])
+        subprocess.check_output(['git', '-C', self.index_path, 'commit', 'config.json', '-m', 'changing the API URL.'])
 
     def get_packages(self):
         """Returns a list of `(package_names, path_in_index)`."""
@@ -175,6 +183,10 @@ class Downloader:
             os.makedirs(os.path.join(target_dir, version))
         if not os.path.isdir(os.path.join(target_api_dir, version)):
             os.makedirs(os.path.join(target_api_dir, version))
+        try:
+            os.symlink(os.path.abspath(crate_filename), os.path.join(target_api_dir, version, 'download'))
+        except FileExistsError:
+            pass
 
         html_filename = os.path.join(target_dir, version, 'index.html')
         html_timestamp = file_timestamp(html_filename)
@@ -286,20 +298,21 @@ class Downloader:
         return (package_name, description)
 
 def main():
-    if len(sys.argv) == 3:
-        (_, index_path, mirror_path) = sys.argv
+    if len(sys.argv) == 4:
+        (_, index_path, mirror_path, root_url) = sys.argv
         processes = 20
-    elif len(sys.argv) == 4:
-        (_, index_path, mirror_path, processes) = sys.argv
+    elif len(sys.argv) == 5:
+        (_, index_path, mirror_path, root_url, processes) = sys.argv
         processes = int(processes)
     else:
-        print('Syntax: {} <index_path> <mirror_path> [<concurrency>]'.format(sys.argv[0]))
+        print('Syntax: {} <index_path> <mirror_path> <root_url> [<concurrency>]'.format(sys.argv[0]))
         exit(1)
-    downloader = Downloader(index_path, mirror_path)
+    downloader = Downloader(index_path, mirror_path, root_url)
     downloader.update_index()
 
     if not os.path.isdir(mirror_path):
         os.makedirs(mirror_path)
+
     html_filename = os.path.join(mirror_path, 'index.html')
     if os.path.exists(html_filename):
         os.unlink(html_filename)
