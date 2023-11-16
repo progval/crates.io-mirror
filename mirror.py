@@ -146,14 +146,14 @@ class Downloader:
         with tf.extractfile(ti) as toml_file:
             try:
                 return toml.loads(toml_file.read().decode())
-            except toml.TomlDecodeError:
+            except Exception:
                 return {}
-            except Exception as e:
-                raise toml.TomlDecodeError('Failed unTOMLing Cargo.toml from {}'.format(tf.name))
 
     def get_readme(self, tf, dir_in_crate, parsed_toml):
         readme_path = parsed_toml.get('package', {}).get('readme', None)
         if readme_path:
+            if not isinstance(readme_path, str):
+                return '"readme" key in Cargo.toml, but invalid value type'
             if readme_path.startswith('./'):
                 readme_path = readme_path[2:]
             readme_path = os.path.join(dir_in_crate, readme_path)
@@ -216,6 +216,11 @@ class Downloader:
             with open(html_filename, 'a') as fd:
                 fd.write('<!DOCTYPE html><html><head><title>{name} version {vers}</title></head><body>\n'.format(**release))
                 fd.write(markdown2.markdown(readme))
+                try:
+                    body = markdown2.markdown(readme)
+                except UnicodeDecodeError as e:
+                    body = '<h1>{name}</h1><p>Failed to generate description: {e}</p>'.format(**release, e=e)
+                fd.write(body)
                 fd.write('\n</body></html>')
 
         json_data = {'version': {
@@ -240,7 +245,11 @@ class Downloader:
     def gen_package(self, package_name, index_filename):
         #print('Generating HTML for {}'.format(package_name))
         releases = list(self.get_releases(index_filename))
-        releases.sort(key=lambda x: semver.parse_version_info(x['vers']))
+        try:
+            releases.sort(key=lambda x: semver.parse_version_info(x['vers']))
+        except ValueError:
+            # eg. ValueError: 0.0.1-001 is not valid SemVer string
+            pass
         description = ''
         json_versions_data = []
         for (i, release) in enumerate(releases):
@@ -294,7 +303,11 @@ class Downloader:
     def worker(self, args):
         (package_name, index_filename) = args
         self.download_package(package_name, index_filename)
-        description = self.gen_package(package_name, index_filename)
+        try:
+            description = self.gen_package(package_name, index_filename)
+        except:
+            print("Error handling package {}".format(package_name))
+            raise
         return (package_name, description)
 
 def main():
